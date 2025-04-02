@@ -9,7 +9,7 @@ from streamlit_autorefresh import st_autorefresh
 
 # --- CONFIG ---
 SQUIGGLE_TIPS_URL = "https://api.squiggle.com.au/?q=tips"
-SQUIGGLE_GAMES_URL = "https://api.squiggle.com.au/?q=games;year=2025"
+SQUIGGLE_GAMES_URL = "https://api.squiggle.com.au/?q=games"
 SQUIGGLE_SCORES_URL = "https://api.squiggle.com.au/?q=scores"
 TEAM_LOGO_URL = "https://squiggle.com.au/wp-content/themes/squiggle/assets/images/logos/"
 REFRESH_INTERVAL = 60  # seconds
@@ -20,7 +20,7 @@ def fetch_squiggle_games():
     data = response.json().get("games", [])
     rows = []
     for game in data:
-        if not game.get("hteam") or not game.get("ateam"):
+        if "hteam" not in game or "ateam" not in game or "date" not in game:
             continue
         rows.append({
             "Match": f"{game['hteam']} vs {game['ateam']}",
