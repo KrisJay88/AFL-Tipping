@@ -19,7 +19,7 @@ REFRESH_INTERVAL = 60  # seconds
 def get_team_name_map():
     response = requests.get(SQUIGGLE_TEAMS_URL)
     teams = response.json().get("teams", [])
-    return {team["id"]: team["name"] for team in teams}
+    return {team["id"]: team["name"] for team in teams if "id" in team and "name" in team}
 
 def fetch_squiggle_games():
     team_map = get_team_name_map()
