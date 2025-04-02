@@ -37,7 +37,7 @@ def fetch_squiggle_games():
         games = response.json().get("games", [])
 
         now = datetime.utcnow()
-        upcoming_games = [g for g in games if "date" in g and datetime.fromisoformat(g["date"].replace("Z", "+00:00")) > now - timedelta(days=3)]
+        upcoming_games = [g for g in games if "date" in g and datetime.fromisoformat(g["date"].replace("Z", "+00:00")) > now - timedelta(days=7)]
 
         if not upcoming_games:
             return pd.DataFrame()
@@ -69,8 +69,11 @@ def fetch_squiggle_games():
                 "Match Preview": "No preview available."
             })
         return pd.DataFrame(rows)
+    except requests.exceptions.RequestException as e:
+        st.warning(f"Error fetching games: {e}, Status Code: {response.status_code}, Response: {response.text}")
+        return pd.DataFrame()
     except Exception as e:
-        st.warning(f"Error fetching games: {e}")
+        st.warning(f"Unexpected error: {e}")
         return pd.DataFrame()
 
 def fetch_squiggle_tips():
