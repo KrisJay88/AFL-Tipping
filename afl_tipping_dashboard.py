@@ -5,7 +5,7 @@ import requests
 from datetime import datetime, timedelta
 import matplotlib.pyplot as plt
 import base64
-import time
+from streamlit_autorefresh import st_autorefresh
 
 # --- CONFIG ---
 SQUIGGLE_TIPS_URL = "https://api.squiggle.com.au/?q=tips"
@@ -82,10 +82,9 @@ def format_countdown(start_time):
 st.set_page_config(page_title="AFL Tipping Dashboard", layout="wide", initial_sidebar_state="expanded")
 st.title("🏏 AFL Tipping Assistant Dashboard")
 
-# Auto-refresh timer
+# Auto-refresh every 60 seconds
+st_autorefresh(interval=REFRESH_INTERVAL * 1000, limit=None, key="autorefresh")
 st.caption("⏱ This page auto-refreshes every 60 seconds to update scores and countdowns.")
-time.sleep(REFRESH_INTERVAL)
-st.rerun()
 
 with st.spinner("Fetching live games, tips, and scores..."):
     try:
