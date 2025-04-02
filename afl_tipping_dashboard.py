@@ -86,18 +86,7 @@ def fetch_squiggle_tips():
         st.warning(f"Error fetching tips: {e}")
         return pd.DataFrame()
 
-def fetch_squiggle_scores():
-    response = requests.get(SQUIGGLE_SCORES_URL)
-    scores_data = response.json().get("games", [])
-    scores_list = []
-    for game in scores_data:
-        scores_list.append({
-            "Match": f"{game['hteam']} vs {game['ateam']}",
-            "Home Score": game.get("hscore"),
-            "Away Score": game.get("ascore")
-        })
-    return pd.DataFrame(scores_list)
-
+# --- REMAINING APP ---
 def get_team_logo(team_name):
     formatted = team_name.lower().replace(" ", "-").replace("&", "and")
     return f"{TEAM_LOGO_URL}{formatted}.svg"
@@ -127,63 +116,62 @@ with st.spinner("Fetching live games, tips, and scores..."):
     try:
         games_df = fetch_squiggle_games()
         tips_df = fetch_squiggle_tips()
-        scores_df = fetch_squiggle_scores()
 
-        combined_df = pd.merge(games_df, tips_df, on="Match", how="left")
-        combined_df = pd.merge(combined_df, scores_df, on="Match", how="left")
+        if games_df.empty:
+            st.info("No game data available.")
+        else:
+            combined_df = pd.merge(games_df, tips_df, on="Match", how="left")
 
-        # Sidebar filters
-        st.sidebar.header("🔍 Filters")
-        all_teams = sorted(set(combined_df["Home Team"].unique()) | set(combined_df["Away Team"].unique()))
-        selected_team = st.sidebar.selectbox("Filter by team", ["All"] + all_teams)
-        min_conf = st.sidebar.slider("Minimum confidence %", 0, 100, 0)
+            # Sidebar filters
+            st.sidebar.header("🔍 Filters")
+            all_teams = sorted(set(combined_df["Home Team"].unique()) | set(combined_df["Away Team"].unique()))
+            selected_team = st.sidebar.selectbox("Filter by team", ["All"] + all_teams)
+            min_conf = st.sidebar.slider("Minimum confidence %", 0, 100, 0)
 
-        filtered_df = combined_df.copy()
-        if selected_team != "All":
-            filtered_df = filtered_df[(filtered_df["Home Team"] == selected_team) | (filtered_df["Away Team"] == selected_team)]
-        if min_conf > 0:
-            filtered_df = filtered_df[filtered_df["Confidence"].fillna(0) >= min_conf]
+            filtered_df = combined_df.copy()
+            if selected_team != "All":
+                filtered_df = filtered_df[(filtered_df["Home Team"] == selected_team) | (filtered_df["Away Team"] == selected_team)]
+            if min_conf > 0:
+                filtered_df = filtered_df[filtered_df["Confidence"].fillna(0) >= min_conf]
 
-        st.subheader("🔢 Full Match Table")
-        for _, row in filtered_df.sort_values("Start Time").iterrows():
-            with st.expander(f"{row['Match']} — {row['Start Time'].strftime('%a, %b %d %I:%M %p')} | Countdown: {format_countdown(row['Start Time'])}"):
-                col1, col2 = st.columns([1, 6])
-                with col1:
-                    st.image(get_team_logo(row["Home Team"]), width=50)
-                    st.image(get_team_logo(row["Away Team"]), width=50)
-                with col2:
-                    st.markdown(f"**Venue**: {row['Venue']}")
-                    st.markdown(f"**Home Odds**: {row['Home Odds']}")
-                    st.markdown(f"**Away Odds**: {row['Away Odds']}")
-                    if pd.notna(row["Tip"]):
-                        st.markdown(f"**Squiggle Tip**: {row['Tip']} ({row['Confidence']}% confidence)")
-                    if pd.notna(row["Home Score"]) and pd.notna(row["Away Score"]):
-                        st.success(f"**Live Score:** {row['Home Team']} {int(row['Home Score'])} - {row['Away Team']} {int(row['Away Score'])}")
-                    st.markdown("**Match Preview**:")
-                    st.info(row["Match Preview"])
+            st.subheader("🔢 Full Match Table")
+            for _, row in filtered_df.sort_values("Start Time").iterrows():
+                with st.expander(f"{row['Match']} — {row['Start Time'].strftime('%a, %b %d %I:%M %p')} | Countdown: {format_countdown(row['Start Time'])}"):
+                    col1, col2 = st.columns([1, 6])
+                    with col1:
+                        st.image(get_team_logo(row["Home Team"]), width=50)
+                        st.image(get_team_logo(row["Away Team"]), width=50)
+                    with col2:
+                        st.markdown(f"**Venue**: {row['Venue']}")
+                        st.markdown(f"**Home Odds**: {row['Home Odds']}")
+                        st.markdown(f"**Away Odds**: {row['Away Odds']}")
+                        if pd.notna(row["Tip"]):
+                            st.markdown(f"**Squiggle Tip**: {row['Tip']} ({row['Confidence']}% confidence)")
+                        st.markdown("**Match Preview**:")
+                        st.info(row["Match Preview"])
 
-        st.subheader("🔥 Potential Upset Picks")
-        upsets = filtered_df[(filtered_df["Tip"] == filtered_df["Away Team"]) & (filtered_df["Away Odds"].fillna(0) > 2.5)]
-        st.dataframe(upsets if not upsets.empty else "No big upsets found this week!")
+            st.subheader("🔥 Potential Upset Picks")
+            upsets = filtered_df[(filtered_df["Tip"] == filtered_df["Away Team"]) & (filtered_df["Away Odds"].fillna(0) > 2.5)]
+            st.dataframe(upsets if not upsets.empty else "No big upsets found this week!")
 
-        st.subheader("📊 Tip Confidence Overview")
-        conf_data = filtered_df.dropna(subset=["Confidence"])
-        if not conf_data.empty:
-            fig, ax = plt.subplots()
-            conf_data.groupby("Tip")["Confidence"].mean().sort_values().plot(kind="barh", ax=ax)
-            ax.set_xlabel("Average Confidence (%)")
-            ax.set_title("Average Confidence by Tipped Team")
-            st.pyplot(fig)
+            st.subheader("📊 Tip Confidence Overview")
+            conf_data = filtered_df.dropna(subset=["Confidence"])
+            if not conf_data.empty:
+                fig, ax = plt.subplots()
+                conf_data.groupby("Tip")["Confidence"].mean().sort_values().plot(kind="barh", ax=ax)
+                ax.set_xlabel("Average Confidence (%)")
+                ax.set_title("Average Confidence by Tipped Team")
+                st.pyplot(fig)
 
-        st.subheader("📈 Summary Stats")
-        if not conf_data.empty:
-            top = conf_data.loc[conf_data["Confidence"].idxmax()]
-            st.markdown(f"**Top Tip:** {top['Tip']} to win {top['Match']} ({top['Confidence']}% confidence)")
-        if not upsets.empty:
-            big = upsets.loc[upsets["Away Odds"].idxmax()]
-            st.markdown(f"**Biggest Upset Pick:** {big['Away Team']} to beat {big['Home Team']} at odds {big['Away Odds']}")
+            st.subheader("📈 Summary Stats")
+            if not conf_data.empty:
+                top = conf_data.loc[conf_data["Confidence"].idxmax()]
+                st.markdown(f"**Top Tip:** {top['Tip']} to win {top['Match']} ({top['Confidence']}% confidence)")
+            if not upsets.empty:
+                big = upsets.loc[upsets["Away Odds"].idxmax()]
+                st.markdown(f"**Biggest Upset Pick:** {big['Away Team']} to beat {big['Home Team']} at odds {big['Away Odds']}")
 
-        st.markdown(generate_csv_download(filtered_df), unsafe_allow_html=True)
+            st.markdown(generate_csv_download(filtered_df), unsafe_allow_html=True)
 
     except Exception as e:
         st.error(f"Error fetching data: {e}")
