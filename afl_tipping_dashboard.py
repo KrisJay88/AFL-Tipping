@@ -140,12 +140,15 @@ with st.spinner("Fetching live games, tips, and scores..."):
             all_teams = sorted(set(combined_df["Home Team"]).union(combined_df["Away Team"]))
             selected_team = st.sidebar.selectbox("Filter by team", ["All"] + all_teams)
             min_conf = st.sidebar.slider("Minimum confidence %", 0, 100, 0)
+            show_upcoming_only = st.sidebar.checkbox("Show only upcoming games", True)
 
             filtered_df = combined_df.copy()
             if selected_team != "All":
                 filtered_df = filtered_df[(filtered_df["Home Team"] == selected_team) | (filtered_df["Away Team"] == selected_team)]
             if min_conf > 0:
                 filtered_df = filtered_df[filtered_df["Confidence"].fillna(0) >= min_conf]
+            if show_upcoming_only:
+                filtered_df = filtered_df[filtered_df["Start Time"] > datetime.utcnow()]
 
             st.subheader(f"🔢 Matches - Round {selected_round}")
             for _, row in filtered_df.sort_values("Start Time").iterrows():
@@ -175,6 +178,11 @@ with st.spinner("Fetching live games, tips, and scores..."):
                 ax.set_xlabel("Average Confidence (%)")
                 ax.set_title("Average Confidence by Tipped Team")
                 st.pyplot(fig)
+
+            st.subheader("🏅 Tip Counts This Round")
+            tip_counts = filtered_df["Tip"].value_counts().reset_index()
+            tip_counts.columns = ["Team", "Tip Count"]
+            st.dataframe(tip_counts)
 
             st.subheader("📈 Summary Stats")
             if not conf_data.empty:
