@@ -8,8 +8,9 @@ import base64
 from streamlit_autorefresh import st_autorefresh
 
 # --- CONFIG ---
-SQUIGGLE_TIPS_URL = "https://api.squiggle.com.au/?q=tips;year=2024"
-SQUIGGLE_GAMES_URL = "https://api.squiggle.com.au/?q=games;year=2024"
+CURRENT_YEAR = datetime.now().year
+SQUIGGLE_TIPS_URL = f"https://api.squiggle.com.au/?q=tips;year={CURRENT_YEAR}"
+SQUIGGLE_GAMES_URL = f"https://api.squiggle.com.au/?q=games;year={CURRENT_YEAR}"
 SQUIGGLE_TEAMS_URL = "https://api.squiggle.com.au/?q=teams"
 TEAM_LOGO_URL = "https://squiggle.com.au/wp-content/themes/squiggle/assets/images/logos/"
 REFRESH_INTERVAL = 60  # seconds
