@@ -34,6 +34,44 @@ def fetch_squiggle_games():
         if response.status_code != 200 or not response.content:
             return pd.DataFrame()
         data = response.json().get("games", [])
+
+        # Determine next round with unplayed games
+        upcoming_games = [g for g in data if not g.get("complete") and "round" in g]
+        if not upcoming_games:
+            return pd.DataFrame()
+        next_round = min(g["round"] for g in upcoming_games)
+
+        rows = []
+        for game in data:
+            if not all(k in game for k in ("hteamid", "ateamid", "date", "round")):
+                continue
+            if game["round"] != next_round:
+                continue
+            hteam_id = game["hteamid"]
+            ateam_id = game["ateamid"]
+            hteam_name = team_map.get(hteam_id, str(hteam_id))
+            ateam_name = team_map.get(ateam_id, str(ateam_id))
+            home_odds = game.get("odds", {}).get(str(hteam_id))
+            away_odds = game.get("odds", {}).get(str(ateam_id))
+            game_time = datetime.fromisoformat(game["date"])
+            rows.append({
+                "Game ID": game.get("id"),
+                "Round": game["round"],
+                "Start Time": game_time,
+                "Venue": game.get("venue", "Unknown Venue"),
+                "Home Team": hteam_name,
+                "Away Team": ateam_name,
+                "Home Team ID": hteam_id,
+                "Away Team ID": ateam_id,
+                "Home Odds": home_odds,
+                "Away Odds": away_odds,
+                "Match Preview": "No preview available."
+            })
+        return pd.DataFrame(rows)
+    except Exception as e:
+        st.warning(f"Error fetching games: {e}")
+        return pd.DataFrame()
+        data = response.json().get("games", [])
         rows = []
         for game in data:
             if not all(k in game for k in ("hteamid", "ateamid", "date")):
@@ -125,13 +163,16 @@ st.caption("⏱ This page auto-refreshes every 60 seconds to update scores and c
 
 with st.spinner("Fetching live games, tips, and scores..."):
     try:
-        games_df = fetch_squiggle_games()
+        all_games = fetch_squiggle_games()
         tips_df = fetch_squiggle_tips()
-        combined_df = merge_games_and_tips(games_df, tips_df)
 
-        if combined_df.empty:
-            st.info("No future game data available.")
-        else:
+        available_rounds = sorted(all_games["Round"].unique()) if not all_games.empty else []
+        selected_round = st.sidebar.selectbox("Select Round", available_rounds) if available_rounds else None
+
+        if selected_round is not None:
+            games_df = all_games[all_games["Round"] == selected_round]
+            combined_df = merge_games_and_tips(games_df, tips_df)
+
             st.sidebar.header("🔍 Filters")
             all_teams = sorted(set(combined_df["Home Team"]).union(combined_df["Away Team"]))
             selected_team = st.sidebar.selectbox("Filter by team", ["All"] + all_teams)
@@ -143,7 +184,7 @@ with st.spinner("Fetching live games, tips, and scores..."):
             if min_conf > 0:
                 filtered_df = filtered_df[filtered_df["Confidence"].fillna(0) >= min_conf]
 
-            st.subheader("🔢 Future Matches with Tips")
+            st.subheader(f"🔢 Matches - Round {selected_round}")
             for _, row in filtered_df.sort_values("Start Time").iterrows():
                 with st.expander(f"{row['Home Team']} vs {row['Away Team']} — {row['Start Time'].strftime('%a, %b %d %I:%M %p')} | Countdown: {format_countdown(row['Start Time'])}"):
                     col1, col2 = st.columns([1, 6])
@@ -181,6 +222,9 @@ with st.spinner("Fetching live games, tips, and scores..."):
                 st.markdown(f"**Biggest Upset Pick:** {big['Away Team']} to beat {big['Home Team']} at odds {big['Away Odds']}")
 
             st.markdown(generate_csv_download(filtered_df), unsafe_allow_html=True)
+
+        else:
+            st.info("No rounds available yet.")
 
     except Exception as e:
         st.error(f"Error fetching data: {e}")
