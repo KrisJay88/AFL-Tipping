@@ -20,8 +20,12 @@ def get_team_name_map():
     try:
         response = requests.get(SQUIGGLE_TEAMS_URL)
         response.raise_for_status()
-        teams = response.json().get("teams", [])
-        return {team["id"]: team["name"] for team in teams}
+        data = response.json()
+        if "teams" not in data:
+            st.warning(f"Unexpected teams response: {data}")
+            return {}
+        teams = data["teams"]
+        return {team["id"]: team["name"] for team in teams if "id" in team and "name" in team}
     except Exception as e:
         st.warning(f"Error fetching teams: {e}")
         return {}
