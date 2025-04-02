@@ -18,12 +18,16 @@ REFRESH_INTERVAL = 60  # seconds
 # --- FUNCTIONS ---
 def get_team_name_map():
     response = requests.get(SQUIGGLE_TEAMS_URL)
+    if response.status_code != 200 or not response.content:
+        return {}
     teams = response.json().get("teams", [])
     return {team["id"]: team["name"] for team in teams if "id" in team and "name" in team}
 
 def fetch_squiggle_games():
     team_map = get_team_name_map()
     response = requests.get(SQUIGGLE_GAMES_URL)
+    if response.status_code != 200 or not response.content:
+        return pd.DataFrame()
     data = response.json().get("games", [])
     rows = []
     for game in data:
@@ -53,6 +57,8 @@ def fetch_squiggle_games():
 def fetch_squiggle_tips():
     team_map = get_team_name_map()
     response = requests.get(SQUIGGLE_TIPS_URL)
+    if response.status_code != 200 or not response.content:
+        return pd.DataFrame()
     tips_data = response.json().get("tips", [])
     tips_list = []
     for tip in tips_data:
