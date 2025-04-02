@@ -27,10 +27,10 @@ def fetch_squiggle_games():
     data = response.json().get("games", [])
     rows = []
     for game in data:
-        if "hteam" not in game or "ateam" not in game or "date" not in game:
+        if not all(k in game for k in ("hteam", "ateam", "hteamid", "ateamid", "date")):
             continue
-        hteam_name = team_map.get(game["hteam"], str(game["hteam"]))
-        ateam_name = team_map.get(game["ateam"], str(game["ateam"]))
+        hteam_name = team_map.get(game["hteamid"], str(game["hteamid"]))
+        ateam_name = team_map.get(game["ateamid"], str(game["ateamid"]))
         rows.append({
             "Match": f"{hteam_name} vs {ateam_name}",
             "Start Time": datetime.fromisoformat(game["date"]),
