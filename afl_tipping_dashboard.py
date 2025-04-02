@@ -35,17 +35,9 @@ def fetch_squiggle_games():
             return pd.DataFrame()
         data = response.json().get("games", [])
 
-        # Determine next round with unplayed games
-        upcoming_games = [g for g in data if not g.get("complete") and "round" in g]
-        if not upcoming_games:
-            return pd.DataFrame()
-        next_round = min(g["round"] for g in upcoming_games)
-
         rows = []
         for game in data:
             if not all(k in game for k in ("hteamid", "ateamid", "date", "round")):
-                continue
-            if game["round"] != next_round:
                 continue
             hteam_id = game["hteamid"]
             ateam_id = game["ateamid"]
@@ -57,37 +49,6 @@ def fetch_squiggle_games():
             rows.append({
                 "Game ID": game.get("id"),
                 "Round": game["round"],
-                "Start Time": game_time,
-                "Venue": game.get("venue", "Unknown Venue"),
-                "Home Team": hteam_name,
-                "Away Team": ateam_name,
-                "Home Team ID": hteam_id,
-                "Away Team ID": ateam_id,
-                "Home Odds": home_odds,
-                "Away Odds": away_odds,
-                "Match Preview": "No preview available."
-            })
-        return pd.DataFrame(rows)
-    except Exception as e:
-        st.warning(f"Error fetching games: {e}")
-        return pd.DataFrame()
-        data = response.json().get("games", [])
-        rows = []
-        for game in data:
-            if not all(k in game for k in ("hteamid", "ateamid", "date")):
-                continue
-            game_time = datetime.fromisoformat(game["date"])
-            if game_time < datetime.utcnow():
-                continue  # Skip past games
-            hteam_id = game["hteamid"]
-            ateam_id = game["ateamid"]
-            hteam_name = team_map.get(hteam_id, str(hteam_id))
-            ateam_name = team_map.get(ateam_id, str(ateam_id))
-            home_odds = game.get("odds", {}).get(str(hteam_id))
-            away_odds = game.get("odds", {}).get(str(ateam_id))
-            rows.append({
-                "Game ID": game.get("id"),
-                "Round": game.get("round"),
                 "Start Time": game_time,
                 "Venue": game.get("venue", "Unknown Venue"),
                 "Home Team": hteam_name,
@@ -166,10 +127,12 @@ with st.spinner("Fetching live games, tips, and scores..."):
         all_games = fetch_squiggle_games()
         tips_df = fetch_squiggle_tips()
 
-        available_rounds = sorted(all_games["Round"].unique()) if not all_games.empty else []
-        selected_round = st.sidebar.selectbox("Select Round", available_rounds) if available_rounds else None
+        if all_games.empty:
+            st.info("No game data available at the moment. Please try again later.")
+        else:
+            available_rounds = sorted(all_games["Round"].unique())
+            selected_round = st.sidebar.selectbox("Select Round", available_rounds)
 
-        if selected_round is not None:
             games_df = all_games[all_games["Round"] == selected_round]
             combined_df = merge_games_and_tips(games_df, tips_df)
 
@@ -222,9 +185,6 @@ with st.spinner("Fetching live games, tips, and scores..."):
                 st.markdown(f"**Biggest Upset Pick:** {big['Away Team']} to beat {big['Home Team']} at odds {big['Away Odds']}")
 
             st.markdown(generate_csv_download(filtered_df), unsafe_allow_html=True)
-
-        else:
-            st.info("No rounds available yet.")
 
     except Exception as e:
         st.error(f"Error fetching data: {e}")
