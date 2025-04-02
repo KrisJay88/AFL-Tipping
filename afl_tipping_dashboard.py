@@ -84,7 +84,8 @@ st.title("🏏 AFL Tipping Assistant Dashboard")
 
 # Auto-refresh timer
 st.caption("⏱ This page auto-refreshes every 60 seconds to update scores and countdowns.")
-st_autorefresh = st.experimental_rerun if st.experimental_get_query_params().get("autorefresh") else time.sleep(REFRESH_INTERVAL) or st.experimental_rerun()
+time.sleep(REFRESH_INTERVAL)
+st.rerun()
 
 with st.spinner("Fetching live games, tips, and scores..."):
     try:
