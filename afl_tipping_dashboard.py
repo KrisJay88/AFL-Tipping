@@ -11,23 +11,32 @@ from streamlit_autorefresh import st_autorefresh
 SQUIGGLE_TIPS_URL = "https://api.squiggle.com.au/?q=tips"
 SQUIGGLE_GAMES_URL = "https://api.squiggle.com.au/?q=games;year=2024"
 SQUIGGLE_SCORES_URL = "https://api.squiggle.com.au/?q=scores"
+SQUIGGLE_TEAMS_URL = "https://api.squiggle.com.au/?q=teams"
 TEAM_LOGO_URL = "https://squiggle.com.au/wp-content/themes/squiggle/assets/images/logos/"
 REFRESH_INTERVAL = 60  # seconds
 
 # --- FUNCTIONS ---
+def get_team_name_map():
+    response = requests.get(SQUIGGLE_TEAMS_URL)
+    teams = response.json().get("teams", [])
+    return {team["id"]: team["name"] for team in teams}
+
 def fetch_squiggle_games():
+    team_map = get_team_name_map()
     response = requests.get(SQUIGGLE_GAMES_URL)
     data = response.json().get("games", [])
     rows = []
     for game in data:
         if "hteam" not in game or "ateam" not in game or "date" not in game:
             continue
+        hteam_name = team_map.get(game["hteam"], str(game["hteam"]))
+        ateam_name = team_map.get(game["ateam"], str(game["ateam"]))
         rows.append({
-            "Match": f"{game['hteam']} vs {game['ateam']}",
+            "Match": f"{hteam_name} vs {ateam_name}",
             "Start Time": datetime.fromisoformat(game["date"]),
             "Venue": game.get("venue", "Unknown Venue"),
-            "Home Team": game["hteam"],
-            "Away Team": game["ateam"],
+            "Home Team": hteam_name,
+            "Away Team": ateam_name,
             "Home Odds": game.get("odds", {}).get("hteam", None),
             "Away Odds": game.get("odds", {}).get("ateam", None),
             "Match Preview": "No preview available."
