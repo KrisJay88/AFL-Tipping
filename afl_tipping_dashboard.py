@@ -11,6 +11,7 @@ from streamlit_autorefresh import st_autorefresh
 CURRENT_YEAR = datetime.now().year
 SQUIGGLE_TEAMS_URL = "https://api.squiggle.com.au/?q=teams"
 SQUIGGLE_GAMES_URL = f"https://api.squiggle.com.au/?q=games;year={CURRENT_YEAR}"
+SQUIGGLE_TIPS_URL = f"https://api.squiggle.com.au/?q=tips;year={CURRENT_YEAR}"
 TEAM_LOGO_URL = "https://squiggle.com.au/wp-content/themes/squiggle/assets/images/logos/"
 REFRESH_INTERVAL = 60  # seconds
 
@@ -29,41 +30,18 @@ def get_team_name_map():
         st.warning(f"Error fetching teams: {e}")
         return {}
 
-def get_current_round(games):
-    now = datetime.utcnow()
-    closest_game = None
-    closest_diff = timedelta(days=365)
+def get_all_rounds(games):
+    return sorted(set(game.get("round") for game in games if "round" in game))
 
-    for game in games:
-        try:
-            game_time = datetime.fromisoformat(game["date"].replace("Z", "+00:00"))
-            diff = abs(game_time - now)
-            if diff < closest_diff:
-                closest_diff = diff
-                closest_game = game
-        except:
-            continue
-
-    if closest_game and "round" in closest_game:
-        return closest_game["round"]
-    return None
-
-def fetch_squiggle_games():
+def fetch_all_games():
     try:
         team_map = get_team_name_map()
         response = requests.get(SQUIGGLE_GAMES_URL)
         response.raise_for_status()
         games = response.json().get("games", [])
 
-        current_round = get_current_round(games)
-        if current_round is None:
-            st.warning("Could not determine the current round.")
-            return pd.DataFrame()
-
-        round_games = [g for g in games if g.get("round") == current_round]
-
         rows = []
-        for game in round_games:
+        for game in games:
             hteam_id = game.get("hteamid")
             ateam_id = game.get("ateamid")
             hteam_name = team_map.get(hteam_id, game.get("hteam", ""))
@@ -83,142 +61,56 @@ def fetch_squiggle_games():
                 "Away Team ID": ateam_id,
                 "Home Odds": None,
                 "Away Odds": None,
-                "Match Preview": "No preview available."
+                "Match Preview": game.get("preview", "No preview available."),
+                "Winner": game.get("winner")
             })
-        return pd.DataFrame(rows)
+        return pd.DataFrame(rows), games
     except requests.exceptions.RequestException as e:
         st.warning(f"Error fetching games: {e}, Status Code: {response.status_code}, Response: {response.text}")
-        return pd.DataFrame()
+        return pd.DataFrame(), []
     except Exception as e:
         st.warning(f"Unexpected error: {e}")
-        return pd.DataFrame()
+        return pd.DataFrame(), []
 
 def fetch_squiggle_tips():
     try:
-        tips_url = f"https://api.squiggle.com.au/?q=tips;year={CURRENT_YEAR}"
-        response = requests.get(tips_url)
+        response = requests.get(SQUIGGLE_TIPS_URL)
         response.raise_for_status()
-        tips = response.json().get("tips", [])
-
-        tips_list = []
-        for tip in tips:
-            tips_list.append({
-                "Game ID": tip.get("gameid"),
-                "Round": tip.get("round"),
-                "Home Team ID": tip.get("hteamid"),
-                "Away Team ID": tip.get("ateamid"),
-                "Tip": tip.get("tip"),
-                "Confidence": tip.get("confidence")
-            })
-        return pd.DataFrame(tips_list)
+        return response.json().get("tips", [])
     except Exception as e:
         st.warning(f"Error fetching tips: {e}")
-        return pd.DataFrame()
+        return []
 
-def merge_games_and_tips(games_df, tips_df):
-    if games_df.empty:
-        return games_df
-    return pd.merge(
-        games_df,
-        tips_df[["Game ID", "Tip", "Confidence"]],
-        on="Game ID",
-        how="left"
-    )
-
-def get_team_logo(team_name):
-    formatted = team_name.lower().replace(" ", "-").replace("&", "and")
-    return f"{TEAM_LOGO_URL}{formatted}.svg"
-
-def generate_csv_download(df):
-    csv = df.to_csv(index=False)
-    b64 = base64.b64encode(csv.encode()).decode()
-    href = f'<a href="data:file/csv;base64,{b64}" download="afl_tips.csv">📥 Download Tips as CSV</a>'
-    return href
-
-def format_countdown(start_time):
-    now = datetime.utcnow()
-    delta = start_time - now
-    if delta.total_seconds() > 0:
-        hours, remainder = divmod(int(delta.total_seconds()), 3600)
-        minutes, seconds = divmod(remainder, 60)
-        return f"{hours:02}:{minutes:02}:{seconds:02}"
-    return "Kick-off!"
+def attach_tips_to_games(games_df, tips):
+    tip_map = {(tip["gameid"], tip["source"]): tip for tip in tips if "gameid" in tip and "source" in tip}
+    for idx, row in games_df.iterrows():
+        for source in ["Squiggle", "Matter", "Mooseheads"]:
+            tip = tip_map.get((row["Game ID"], source))
+            if tip:
+                games_df.at[idx, f"Tip by {source}"] = tip.get("tip")
+    return games_df
 
 # --- MAIN APP ---
-st.set_page_config(page_title="AFL Tipping Dashboard", layout="wide")
-st.title("🏏 AFL Tipping Assistant Dashboard")
-st_autorefresh(interval=REFRESH_INTERVAL * 1000, limit=None, key="refresh")
-st.caption("⏱ This page auto-refreshes every 60 seconds to update scores and countdowns.")
+st.title("AFL Tipping Dashboard")
 
-with st.spinner("Fetching live games, tips, and scores..."):
-    try:
-        all_games = fetch_squiggle_games()
-        tips_df = fetch_squiggle_tips()
+# Autorefresh every 60 seconds
+st_autorefresh(interval=REFRESH_INTERVAL * 1000, key="data_refresh")
 
-        if all_games.empty:
-            st.info("No game data available at the moment. Please try again later.")
-        else:
-            selected_round = all_games["Round"].iloc[0]
-            games_df = all_games
-            combined_df = merge_games_and_tips(games_df, tips_df)
+# Fetch all games
+games_df, all_games = fetch_all_games()
 
-            st.sidebar.header("🔍 Filters")
-            all_teams = sorted(set(combined_df["Home Team"]).union(combined_df["Away Team"]))
-            selected_team = st.sidebar.selectbox("Filter by team", ["All"] + all_teams)
-            min_conf = st.sidebar.slider("Minimum confidence %", 0, 100, 0)
-            show_upcoming_only = st.sidebar.checkbox("Show only upcoming games", True)
+if not games_df.empty:
+    tips = fetch_squiggle_tips()
+    games_df = attach_tips_to_games(games_df, tips)
 
-            filtered_df = combined_df.copy()
-            if selected_team != "All":
-                filtered_df = filtered_df[(filtered_df["Home Team"] == selected_team) | (filtered_df["Away Team"] == selected_team)]
-            if min_conf > 0:
-                filtered_df = filtered_df[filtered_df["Confidence"].fillna(0) >= min_conf]
-            if show_upcoming_only:
-                filtered_df = filtered_df[filtered_df["Start Time"] > datetime.utcnow()]
+    available_rounds = get_all_rounds(all_games)
+    selected_round = st.selectbox("Select Round", options=available_rounds, index=len(available_rounds) - 1)
+    filtered_games = games_df[games_df["Round"] == selected_round]
 
-            st.subheader(f"🔢 Matches - Round {selected_round}")
-            for _, row in filtered_df.sort_values("Start Time").iterrows():
-                with st.expander(f"{row['Home Team']} vs {row['Away Team']} — {row['Start Time'].strftime('%a, %b %d %I:%M %p')} | Countdown: {format_countdown(row['Start Time'])}"):
-                    col1, col2 = st.columns([1, 6])
-                    with col1:
-                        st.image(get_team_logo(row["Home Team"]), width=50)
-                        st.image(get_team_logo(row["Away Team"]), width=50)
-                    with col2:
-                        st.markdown(f"**Venue**: {row['Venue']}")
-                        st.markdown(f"**Home Odds**: {row['Home Odds']}")
-                        st.markdown(f"**Away Odds**: {row['Away Odds']}")
-                        if pd.notna(row["Tip"]):
-                            st.markdown(f"**Squiggle Tip**: {row['Tip']} ({row['Confidence']}% confidence)")
-                        st.markdown("**Match Preview:**")
-                        st.info(row["Match Preview"])
-
-            st.subheader("🔥 Potential Upset Picks")
-            upsets = filtered_df[(filtered_df["Tip"] == filtered_df["Away Team"]) & (filtered_df["Away Odds"].fillna(0) > 2.5)]
-            st.dataframe(upsets if not upsets.empty else pd.DataFrame([{"Message": "No big upsets found this week!"}]))
-
-            st.subheader("📊 Tip Confidence Overview")
-            conf_data = filtered_df.dropna(subset=["Confidence"])
-            if not conf_data.empty:
-                fig, ax = plt.subplots()
-                conf_data.groupby("Tip")["Confidence"].mean().sort_values().plot(kind="barh", ax=ax)
-                ax.set_xlabel("Average Confidence (%)")
-                ax.set_title("Average Confidence by Tipped Team")
-                st.pyplot(fig)
-
-            st.subheader("🏅 Tip Counts This Round")
-            tip_counts = filtered_df["Tip"].value_counts().reset_index()
-            tip_counts.columns = ["Team", "Tip Count"]
-            st.dataframe(tip_counts)
-
-            st.subheader("📈 Summary Stats")
-            if not conf_data.empty:
-                top = conf_data.loc[conf_data["Confidence"].idxmax()]
-                st.markdown(f"**Top Tip:** {top['Tip']} to win {top['Home Team']} vs {top['Away Team']} with {top['Confidence']}% confidence")
-            if not upsets.empty:
-                big = upsets.loc[upsets["Away Odds"].idxmax()]
-                st.markdown(f"**Biggest Upset Pick:** {big['Away Team']} to beat {big['Home Team']} at odds {big['Away Odds']}")
-
-            st.markdown(generate_csv_download(filtered_df), unsafe_allow_html=True)
-
-    except Exception as e:
-        st.error(f"Error fetching data: {e}")
+    if not filtered_games.empty:
+        st.subheader(f"Games for Round {selected_round}")
+        st.dataframe(filtered_games)
+    else:
+        st.warning("No games found for the selected round.")
+else:
+    st.warning("No game data available at the moment. Please try again later.")
