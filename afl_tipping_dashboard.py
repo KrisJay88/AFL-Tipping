@@ -17,62 +17,74 @@ REFRESH_INTERVAL = 60  # seconds
 
 # --- FUNCTIONS ---
 def get_team_name_map():
-    response = requests.get(SQUIGGLE_TEAMS_URL)
-    if response.status_code != 200 or not response.content:
+    try:
+        response = requests.get(SQUIGGLE_TEAMS_URL)
+        if response.status_code != 200 or not response.content:
+            return {}
+        teams = response.json().get("teams", [])
+        return {team["id"]: team["name"] for team in teams if "id" in team and "name" in team}
+    except Exception as e:
+        st.warning(f"Error fetching teams: {e}")
         return {}
-    teams = response.json().get("teams", [])
-    return {team["id"]: team["name"] for team in teams if "id" in team and "name" in team}
 
 def fetch_squiggle_games():
-    team_map = get_team_name_map()
-    response = requests.get(SQUIGGLE_GAMES_URL)
-    if response.status_code != 200 or not response.content:
+    try:
+        team_map = get_team_name_map()
+        response = requests.get(SQUIGGLE_GAMES_URL)
+        if response.status_code != 200 or not response.content:
+            return pd.DataFrame()
+        data = response.json().get("games", [])
+        rows = []
+        for game in data:
+            if not all(k in game for k in ("hteamid", "ateamid", "date")):
+                continue
+            hteam_id = game["hteamid"]
+            ateam_id = game["ateamid"]
+            hteam_name = team_map.get(hteam_id, str(hteam_id))
+            ateam_name = team_map.get(ateam_id, str(ateam_id))
+
+            # Attempt to extract odds if present
+            home_odds = game.get("odds", {}).get(str(hteam_id))
+            away_odds = game.get("odds", {}).get(str(ateam_id))
+
+            rows.append({
+                "Match": f"{hteam_name} vs {ateam_name}",
+                "Start Time": datetime.fromisoformat(game["date"]),
+                "Venue": game.get("venue", "Unknown Venue"),
+                "Home Team": hteam_name,
+                "Away Team": ateam_name,
+                "Home Odds": home_odds,
+                "Away Odds": away_odds,
+                "Match Preview": "No preview available."
+            })
+        return pd.DataFrame(rows)
+    except Exception as e:
+        st.warning(f"Error fetching games: {e}")
         return pd.DataFrame()
-    data = response.json().get("games", [])
-    rows = []
-    for game in data:
-        if not all(k in game for k in ("hteamid", "ateamid", "date")):
-            continue
-        hteam_id = game["hteamid"]
-        ateam_id = game["ateamid"]
-        hteam_name = team_map.get(hteam_id, str(hteam_id))
-        ateam_name = team_map.get(ateam_id, str(ateam_id))
-
-        # Attempt to extract odds if present
-        home_odds = game.get("odds", {}).get(str(hteam_id))
-        away_odds = game.get("odds", {}).get(str(ateam_id))
-
-        rows.append({
-            "Match": f"{hteam_name} vs {ateam_name}",
-            "Start Time": datetime.fromisoformat(game["date"]),
-            "Venue": game.get("venue", "Unknown Venue"),
-            "Home Team": hteam_name,
-            "Away Team": ateam_name,
-            "Home Odds": home_odds,
-            "Away Odds": away_odds,
-            "Match Preview": "No preview available."
-        })
-    return pd.DataFrame(rows)
 
 def fetch_squiggle_tips():
-    team_map = get_team_name_map()
-    response = requests.get(SQUIGGLE_TIPS_URL)
-    if response.status_code != 200 or not response.content:
+    try:
+        team_map = get_team_name_map()
+        response = requests.get(SQUIGGLE_TIPS_URL)
+        if response.status_code != 200 or not response.content:
+            return pd.DataFrame()
+        tips_data = response.json().get("tips", [])
+        tips_list = []
+        for tip in tips_data:
+            if not all(k in tip for k in ("hteamid", "ateamid")):
+                continue
+            hteam_name = team_map.get(tip["hteamid"], str(tip["hteamid"]))
+            ateam_name = team_map.get(tip["ateamid"], str(tip["ateamid"]))
+            tips_list.append({
+                "Match": f"{hteam_name} vs {ateam_name}",
+                "Source": tip.get("source", "Unknown"),
+                "Tip": tip.get("tip", ""),
+                "Confidence": tip.get("confidence", None)
+            })
+        return pd.DataFrame(tips_list)
+    except Exception as e:
+        st.warning(f"Error fetching tips: {e}")
         return pd.DataFrame()
-    tips_data = response.json().get("tips", [])
-    tips_list = []
-    for tip in tips_data:
-        if not all(k in tip for k in ("hteamid", "ateamid")):
-            continue
-        hteam_name = team_map.get(tip["hteamid"], str(tip["hteamid"]))
-        ateam_name = team_map.get(tip["ateamid"], str(tip["ateamid"]))
-        tips_list.append({
-            "Match": f"{hteam_name} vs {ateam_name}",
-            "Source": tip.get("source", "Unknown"),
-            "Tip": tip.get("tip", ""),
-            "Confidence": tip.get("confidence", None)
-        })
-    return pd.DataFrame(tips_list)
 
 def fetch_squiggle_scores():
     response = requests.get(SQUIGGLE_SCORES_URL)
