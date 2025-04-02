@@ -33,6 +33,8 @@ def fetch_squiggle_games():
         ateam_id = game["ateamid"]
         hteam_name = team_map.get(hteam_id, str(hteam_id))
         ateam_name = team_map.get(ateam_id, str(ateam_id))
+
+        # Attempt to extract odds if present
         home_odds = game.get("odds", {}).get(str(hteam_id))
         away_odds = game.get("odds", {}).get(str(ateam_id))
 
@@ -49,14 +51,19 @@ def fetch_squiggle_games():
     return pd.DataFrame(rows)
 
 def fetch_squiggle_tips():
+    team_map = get_team_name_map()
     response = requests.get(SQUIGGLE_TIPS_URL)
     tips_data = response.json().get("tips", [])
     tips_list = []
     for tip in tips_data:
+        if not all(k in tip for k in ("hteamid", "ateamid")):
+            continue
+        hteam_name = team_map.get(tip["hteamid"], str(tip["hteamid"]))
+        ateam_name = team_map.get(tip["ateamid"], str(tip["ateamid"]))
         tips_list.append({
-            "Match": f"{tip['hteam']} vs {tip['ateam']}",
-            "Source": tip["source"],
-            "Tip": tip["tip"],
+            "Match": f"{hteam_name} vs {ateam_name}",
+            "Source": tip.get("source", "Unknown"),
+            "Tip": tip.get("tip", ""),
             "Confidence": tip.get("confidence", None)
         })
     return pd.DataFrame(tips_list)
