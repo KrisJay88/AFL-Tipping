@@ -9,7 +9,7 @@ from streamlit_autorefresh import st_autorefresh
 
 # --- CONFIG ---
 SQUIGGLE_TIPS_URL = "https://api.squiggle.com.au/?q=tips"
-SQUIGGLE_GAMES_URL = "https://api.squiggle.com.au/?q=games"
+SQUIGGLE_GAMES_URL = "https://api.squiggle.com.au/?q=games;year=2024"
 SQUIGGLE_SCORES_URL = "https://api.squiggle.com.au/?q=scores"
 TEAM_LOGO_URL = "https://squiggle.com.au/wp-content/themes/squiggle/assets/images/logos/"
 REFRESH_INTERVAL = 60  # seconds
