@@ -28,6 +28,24 @@ def get_team_name_map():
         st.warning(f"Error fetching teams: {e}")
         return {}
 
+def get_current_round():
+    try:
+        games_url = f"https://api.squiggle.com.au/?q=games;year={CURRENT_YEAR}"
+        response = requests.get(games_url)
+        response.raise_for_status()
+        games = response.json().get("games", [])
+
+        now = datetime.utcnow()
+        current_games = [g for g in games if "date" in g and abs((datetime.fromisoformat(g["date"].replace("Z", "+00:00")) - now).days) <= 3]
+        if not current_games:
+            return None
+
+        rounds = [g.get("round") for g in current_games if g.get("round") is not None]
+        return min(rounds) if rounds else None
+    except Exception as e:
+        st.warning(f"Error determining current round: {e}")
+        return None
+
 def fetch_squiggle_games():
     try:
         team_map = get_team_name_map()
@@ -36,13 +54,10 @@ def fetch_squiggle_games():
         response.raise_for_status()
         games = response.json().get("games", [])
 
-        now = datetime.utcnow()
-        upcoming_games = [g for g in games if "date" in g and datetime.fromisoformat(g["date"].replace("Z", "+00:00")) > now - timedelta(days=7)]
-
-        if not upcoming_games:
+        current_round = get_current_round()
+        if current_round is None:
             return pd.DataFrame()
 
-        current_round = min(g["round"] for g in upcoming_games if g.get("round") is not None)
         round_games = [g for g in games if g.get("round") == current_round]
 
         rows = []
