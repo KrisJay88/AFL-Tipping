@@ -8,9 +8,8 @@ import base64
 from streamlit_autorefresh import st_autorefresh
 
 # --- CONFIG ---
-SQUIGGLE_TIPS_URL = "https://api.squiggle.com.au/?q=tips"
+SQUIGGLE_TIPS_URL = "https://api.squiggle.com.au/?q=tips;year=2024"
 SQUIGGLE_GAMES_URL = "https://api.squiggle.com.au/?q=games;year=2024"
-SQUIGGLE_SCORES_URL = "https://api.squiggle.com.au/?q=scores"
 SQUIGGLE_TEAMS_URL = "https://api.squiggle.com.au/?q=teams"
 TEAM_LOGO_URL = "https://squiggle.com.au/wp-content/themes/squiggle/assets/images/logos/"
 REFRESH_INTERVAL = 60  # seconds
@@ -37,15 +36,13 @@ def fetch_squiggle_games():
 
         rows = []
         for game in data:
-            if not all(k in game for k in ("hteamid", "ateamid", "date", "round")):
+            if not all(k in game for k in ("hteam", "ateam", "hteamid", "ateamid", "date", "round")):
                 continue
             hteam_id = game["hteamid"]
             ateam_id = game["ateamid"]
-            hteam_name = team_map.get(hteam_id, str(hteam_id))
-            ateam_name = team_map.get(ateam_id, str(ateam_id))
-            home_odds = game.get("odds", {}).get(str(hteam_id))
-            away_odds = game.get("odds", {}).get(str(ateam_id))
-            game_time = datetime.fromisoformat(game["date"])
+            hteam_name = team_map.get(hteam_id, game["hteam"])
+            ateam_name = team_map.get(ateam_id, game["ateam"])
+            game_time = datetime.fromisoformat(game["date"].replace("Z", "+00:00"))
             rows.append({
                 "Game ID": game.get("id"),
                 "Round": game["round"],
@@ -55,8 +52,8 @@ def fetch_squiggle_games():
                 "Away Team": ateam_name,
                 "Home Team ID": hteam_id,
                 "Away Team ID": ateam_id,
-                "Home Odds": home_odds,
-                "Away Odds": away_odds,
+                "Home Odds": None,
+                "Away Odds": None,
                 "Match Preview": "No preview available."
             })
         return pd.DataFrame(rows)
