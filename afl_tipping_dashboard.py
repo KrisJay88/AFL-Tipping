@@ -18,10 +18,9 @@ REFRESH_INTERVAL = 60  # seconds
 def get_team_name_map():
     try:
         response = requests.get(SQUIGGLE_TEAMS_URL)
-        if response.status_code != 200 or not response.content:
-            return {}
+        response.raise_for_status()
         teams = response.json().get("teams", [])
-        return {team["id"]: team["name"] for team in teams if "id" in team and "name" in team}
+        return {team["id"]: team["name"] for team in teams}
     except Exception as e:
         st.warning(f"Error fetching teams: {e}")
         return {}
@@ -30,22 +29,22 @@ def fetch_squiggle_games():
     try:
         team_map = get_team_name_map()
         response = requests.get(SQUIGGLE_GAMES_URL)
-        if response.status_code != 200 or not response.content:
-            return pd.DataFrame()
-        data = response.json().get("games", [])
+        response.raise_for_status()
+        games = response.json().get("games", [])
 
         rows = []
-        for game in data:
-            if not all(k in game for k in ("hteam", "ateam", "hteamid", "ateamid", "date", "round")):
+        for game in games:
+            hteam_id = game.get("hteamid")
+            ateam_id = game.get("ateamid")
+            hteam_name = team_map.get(hteam_id, game.get("hteam", ""))
+            ateam_name = team_map.get(ateam_id, game.get("ateam", ""))
+            try:
+                game_time = datetime.fromisoformat(game["date"].replace("Z", "+00:00"))
+            except:
                 continue
-            hteam_id = game["hteamid"]
-            ateam_id = game["ateamid"]
-            hteam_name = team_map.get(hteam_id, game["hteam"])
-            ateam_name = team_map.get(ateam_id, game["ateam"])
-            game_time = datetime.fromisoformat(game["date"].replace("Z", "+00:00"))
             rows.append({
                 "Game ID": game.get("id"),
-                "Round": game["round"],
+                "Round": game.get("round"),
                 "Start Time": game_time,
                 "Venue": game.get("venue", "Unknown Venue"),
                 "Home Team": hteam_name,
@@ -64,20 +63,18 @@ def fetch_squiggle_games():
 def fetch_squiggle_tips():
     try:
         response = requests.get(SQUIGGLE_TIPS_URL)
-        if response.status_code != 200 or not response.content:
-            return pd.DataFrame()
-        tips_data = response.json().get("tips", [])
+        response.raise_for_status()
+        tips = response.json().get("tips", [])
+
         tips_list = []
-        for tip in tips_data:
-            if not all(k in tip for k in ("hteamid", "ateamid", "gameid")):
-                continue
+        for tip in tips:
             tips_list.append({
                 "Game ID": tip.get("gameid"),
                 "Round": tip.get("round"),
-                "Home Team ID": tip["hteamid"],
-                "Away Team ID": tip["ateamid"],
-                "Tip": tip.get("tip", ""),
-                "Confidence": tip.get("confidence", None)
+                "Home Team ID": tip.get("hteamid"),
+                "Away Team ID": tip.get("ateamid"),
+                "Tip": tip.get("tip"),
+                "Confidence": tip.get("confidence")
             })
         return pd.DataFrame(tips_list)
     except Exception as e:
@@ -127,7 +124,7 @@ with st.spinner("Fetching live games, tips, and scores..."):
         if all_games.empty:
             st.info("No game data available at the moment. Please try again later.")
         else:
-            available_rounds = sorted(all_games["Round"].unique())
+            available_rounds = sorted(all_games["Round"].dropna().unique())
             selected_round = st.sidebar.selectbox("Select Round", available_rounds)
 
             games_df = all_games[all_games["Round"] == selected_round]
@@ -165,7 +162,7 @@ with st.spinner("Fetching live games, tips, and scores..."):
 
             st.subheader("🔥 Potential Upset Picks")
             upsets = filtered_df[(filtered_df["Tip"] == filtered_df["Away Team"]) & (filtered_df["Away Odds"].fillna(0) > 2.5)]
-            st.dataframe(upsets if not upsets.empty else "No big upsets found this week!")
+            st.dataframe(upsets if not upsets.empty else pd.DataFrame([{"Message": "No big upsets found this week!"}]))
 
             st.subheader("📊 Tip Confidence Overview")
             conf_data = filtered_df.dropna(subset=["Confidence"])
