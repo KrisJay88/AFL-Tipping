@@ -9,8 +9,6 @@ from streamlit_autorefresh import st_autorefresh
 
 # --- CONFIG ---
 CURRENT_YEAR = datetime.now().year
-SQUIGGLE_TIPS_URL = f"https://api.squiggle.com.au/?q=tips;year={CURRENT_YEAR}"
-SQUIGGLE_GAMES_URL = f"https://api.squiggle.com.au/?q=games;year={CURRENT_YEAR}"
 SQUIGGLE_TEAMS_URL = "https://api.squiggle.com.au/?q=teams"
 TEAM_LOGO_URL = "https://squiggle.com.au/wp-content/themes/squiggle/assets/images/logos/"
 REFRESH_INTERVAL = 60  # seconds
@@ -33,12 +31,22 @@ def get_team_name_map():
 def fetch_squiggle_games():
     try:
         team_map = get_team_name_map()
-        response = requests.get(SQUIGGLE_GAMES_URL)
+        games_url = f"https://api.squiggle.com.au/?q=games;year={CURRENT_YEAR}"
+        response = requests.get(games_url)
         response.raise_for_status()
         games = response.json().get("games", [])
 
+        now = datetime.utcnow()
+        upcoming_games = [g for g in games if "date" in g and datetime.fromisoformat(g["date"].replace("Z", "+00:00")) > now - timedelta(days=3)]
+
+        if not upcoming_games:
+            return pd.DataFrame()
+
+        current_round = min(g["round"] for g in upcoming_games if g.get("round") is not None)
+        round_games = [g for g in games if g.get("round") == current_round]
+
         rows = []
-        for game in games:
+        for game in round_games:
             hteam_id = game.get("hteamid")
             ateam_id = game.get("ateamid")
             hteam_name = team_map.get(hteam_id, game.get("hteam", ""))
@@ -67,7 +75,8 @@ def fetch_squiggle_games():
 
 def fetch_squiggle_tips():
     try:
-        response = requests.get(SQUIGGLE_TIPS_URL)
+        tips_url = f"https://api.squiggle.com.au/?q=tips;year={CURRENT_YEAR}"
+        response = requests.get(tips_url)
         response.raise_for_status()
         tips = response.json().get("tips", [])
 
@@ -129,10 +138,8 @@ with st.spinner("Fetching live games, tips, and scores..."):
         if all_games.empty:
             st.info("No game data available at the moment. Please try again later.")
         else:
-            available_rounds = sorted(all_games["Round"].dropna().unique())
-            selected_round = st.sidebar.selectbox("Select Round", available_rounds)
-
-            games_df = all_games[all_games["Round"] == selected_round]
+            selected_round = all_games["Round"].iloc[0]
+            games_df = all_games
             combined_df = merge_games_and_tips(games_df, tips_df)
 
             st.sidebar.header("🔍 Filters")
