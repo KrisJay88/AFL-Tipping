@@ -10,6 +10,7 @@ from streamlit_autorefresh import st_autorefresh
 # --- CONFIG ---
 CURRENT_YEAR = datetime.now().year
 SQUIGGLE_TEAMS_URL = "https://api.squiggle.com.au/?q=teams"
+SQUIGGLE_GAMES_URL = f"https://api.squiggle.com.au/?q=games;year={CURRENT_YEAR}"
 TEAM_LOGO_URL = "https://squiggle.com.au/wp-content/themes/squiggle/assets/images/logos/"
 REFRESH_INTERVAL = 60  # seconds
 
@@ -28,34 +29,35 @@ def get_team_name_map():
         st.warning(f"Error fetching teams: {e}")
         return {}
 
-def get_current_round():
-    try:
-        games_url = f"https://api.squiggle.com.au/?q=games;year={CURRENT_YEAR}"
-        response = requests.get(games_url)
-        response.raise_for_status()
-        games = response.json().get("games", [])
+def get_current_round(games):
+    now = datetime.utcnow()
+    closest_game = None
+    closest_diff = timedelta(days=365)
 
-        now = datetime.utcnow()
-        current_games = [g for g in games if "date" in g and abs((datetime.fromisoformat(g["date"].replace("Z", "+00:00")) - now).days) <= 3]
-        if not current_games:
-            return None
+    for game in games:
+        try:
+            game_time = datetime.fromisoformat(game["date"].replace("Z", "+00:00"))
+            diff = abs(game_time - now)
+            if diff < closest_diff:
+                closest_diff = diff
+                closest_game = game
+        except:
+            continue
 
-        rounds = [g.get("round") for g in current_games if g.get("round") is not None]
-        return min(rounds) if rounds else None
-    except Exception as e:
-        st.warning(f"Error determining current round: {e}")
-        return None
+    if closest_game and "round" in closest_game:
+        return closest_game["round"]
+    return None
 
 def fetch_squiggle_games():
     try:
         team_map = get_team_name_map()
-        games_url = f"https://api.squiggle.com.au/?q=games;year={CURRENT_YEAR}"
-        response = requests.get(games_url)
+        response = requests.get(SQUIGGLE_GAMES_URL)
         response.raise_for_status()
         games = response.json().get("games", [])
 
-        current_round = get_current_round()
+        current_round = get_current_round(games)
         if current_round is None:
+            st.warning("Could not determine the current round.")
             return pd.DataFrame()
 
         round_games = [g for g in games if g.get("round") == current_round]
