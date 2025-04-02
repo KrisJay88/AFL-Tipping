@@ -38,21 +38,24 @@ def fetch_squiggle_games():
         for game in data:
             if not all(k in game for k in ("hteamid", "ateamid", "date")):
                 continue
+            game_time = datetime.fromisoformat(game["date"])
+            if game_time < datetime.utcnow():
+                continue  # Skip past games
             hteam_id = game["hteamid"]
             ateam_id = game["ateamid"]
             hteam_name = team_map.get(hteam_id, str(hteam_id))
             ateam_name = team_map.get(ateam_id, str(ateam_id))
-
-            # Attempt to extract odds if present
             home_odds = game.get("odds", {}).get(str(hteam_id))
             away_odds = game.get("odds", {}).get(str(ateam_id))
-
             rows.append({
-                "Match": f"{hteam_name} vs {ateam_name}",
-                "Start Time": datetime.fromisoformat(game["date"]),
+                "Game ID": game.get("id"),
+                "Round": game.get("round"),
+                "Start Time": game_time,
                 "Venue": game.get("venue", "Unknown Venue"),
                 "Home Team": hteam_name,
                 "Away Team": ateam_name,
+                "Home Team ID": hteam_id,
+                "Away Team ID": ateam_id,
                 "Home Odds": home_odds,
                 "Away Odds": away_odds,
                 "Match Preview": "No preview available."
@@ -64,20 +67,19 @@ def fetch_squiggle_games():
 
 def fetch_squiggle_tips():
     try:
-        team_map = get_team_name_map()
         response = requests.get(SQUIGGLE_TIPS_URL)
         if response.status_code != 200 or not response.content:
             return pd.DataFrame()
         tips_data = response.json().get("tips", [])
         tips_list = []
         for tip in tips_data:
-            if not all(k in tip for k in ("hteamid", "ateamid")):
+            if not all(k in tip for k in ("hteamid", "ateamid", "gameid")):
                 continue
-            hteam_name = team_map.get(tip["hteamid"], str(tip["hteamid"]))
-            ateam_name = team_map.get(tip["ateamid"], str(tip["ateamid"]))
             tips_list.append({
-                "Match": f"{hteam_name} vs {ateam_name}",
-                "Source": tip.get("source", "Unknown"),
+                "Game ID": tip.get("gameid"),
+                "Round": tip.get("round"),
+                "Home Team ID": tip["hteamid"],
+                "Away Team ID": tip["ateamid"],
                 "Tip": tip.get("tip", ""),
                 "Confidence": tip.get("confidence", None)
             })
@@ -86,7 +88,16 @@ def fetch_squiggle_tips():
         st.warning(f"Error fetching tips: {e}")
         return pd.DataFrame()
 
-# --- REMAINING APP ---
+def merge_games_and_tips(games_df, tips_df):
+    if games_df.empty:
+        return games_df
+    return pd.merge(
+        games_df,
+        tips_df[["Game ID", "Tip", "Confidence"]],
+        on="Game ID",
+        how="left"
+    )
+
 def get_team_logo(team_name):
     formatted = team_name.lower().replace(" ", "-").replace("&", "and")
     return f"{TEAM_LOGO_URL}{formatted}.svg"
@@ -116,15 +127,13 @@ with st.spinner("Fetching live games, tips, and scores..."):
     try:
         games_df = fetch_squiggle_games()
         tips_df = fetch_squiggle_tips()
+        combined_df = merge_games_and_tips(games_df, tips_df)
 
-        if games_df.empty:
-            st.info("No game data available.")
+        if combined_df.empty:
+            st.info("No future game data available.")
         else:
-            combined_df = pd.merge(games_df, tips_df, on="Match", how="left")
-
-            # Sidebar filters
             st.sidebar.header("🔍 Filters")
-            all_teams = sorted(set(combined_df["Home Team"].unique()) | set(combined_df["Away Team"].unique()))
+            all_teams = sorted(set(combined_df["Home Team"]).union(combined_df["Away Team"]))
             selected_team = st.sidebar.selectbox("Filter by team", ["All"] + all_teams)
             min_conf = st.sidebar.slider("Minimum confidence %", 0, 100, 0)
 
@@ -134,9 +143,9 @@ with st.spinner("Fetching live games, tips, and scores..."):
             if min_conf > 0:
                 filtered_df = filtered_df[filtered_df["Confidence"].fillna(0) >= min_conf]
 
-            st.subheader("🔢 Full Match Table")
+            st.subheader("🔢 Future Matches with Tips")
             for _, row in filtered_df.sort_values("Start Time").iterrows():
-                with st.expander(f"{row['Match']} — {row['Start Time'].strftime('%a, %b %d %I:%M %p')} | Countdown: {format_countdown(row['Start Time'])}"):
+                with st.expander(f"{row['Home Team']} vs {row['Away Team']} — {row['Start Time'].strftime('%a, %b %d %I:%M %p')} | Countdown: {format_countdown(row['Start Time'])}"):
                     col1, col2 = st.columns([1, 6])
                     with col1:
                         st.image(get_team_logo(row["Home Team"]), width=50)
@@ -147,7 +156,7 @@ with st.spinner("Fetching live games, tips, and scores..."):
                         st.markdown(f"**Away Odds**: {row['Away Odds']}")
                         if pd.notna(row["Tip"]):
                             st.markdown(f"**Squiggle Tip**: {row['Tip']} ({row['Confidence']}% confidence)")
-                        st.markdown("**Match Preview**:")
+                        st.markdown("**Match Preview:**")
                         st.info(row["Match Preview"])
 
             st.subheader("🔥 Potential Upset Picks")
@@ -166,7 +175,7 @@ with st.spinner("Fetching live games, tips, and scores..."):
             st.subheader("📈 Summary Stats")
             if not conf_data.empty:
                 top = conf_data.loc[conf_data["Confidence"].idxmax()]
-                st.markdown(f"**Top Tip:** {top['Tip']} to win {top['Match']} ({top['Confidence']}% confidence)")
+                st.markdown(f"**Top Tip:** {top['Tip']} to win {top['Home Team']} vs {top['Away Team']} with {top['Confidence']}% confidence")
             if not upsets.empty:
                 big = upsets.loc[upsets["Away Odds"].idxmax()]
                 st.markdown(f"**Biggest Upset Pick:** {big['Away Team']} to beat {big['Home Team']} at odds {big['Away Odds']}")
