@@ -8,43 +8,34 @@ import base64
 import time
 
 # --- CONFIG ---
-THEODDSAPI_KEY = "849ff96f89e0f4a7269be8118f300b8c"
-SQUIGGLE_URL = "https://api.squiggle.com.au/?q=tips"
-TEAM_LOGO_URL = "https://squiggle.com.au/wp-content/themes/squiggle/assets/images/logos/"  # Base URL for logos
+SQUIGGLE_TIPS_URL = "https://api.squiggle.com.au/?q=tips"
+SQUIGGLE_GAMES_URL = "https://api.squiggle.com.au/?q=games;year=2025"
+SQUIGGLE_SCORES_URL = "https://api.squiggle.com.au/?q=scores"
+TEAM_LOGO_URL = "https://squiggle.com.au/wp-content/themes/squiggle/assets/images/logos/"
+REFRESH_INTERVAL = 60  # seconds
 
 # --- FUNCTIONS ---
-def fetch_theoddsapi_odds():
-    url = f"https://api.theoddsapi.com/v4/sports/aussierules_afl/odds/?apiKey={THEODDSAPI_KEY}&regions=au&markets=h2h&oddsFormat=decimal"
-    response = requests.get(url)
-    data = response.json()
-
-    odds_list = []
-    for match in data:
-        if not match.get("bookmakers"):
+def fetch_squiggle_games():
+    response = requests.get(SQUIGGLE_GAMES_URL)
+    data = response.json().get("games", [])
+    rows = []
+    for game in data:
+        if not game.get("hteam") or not game.get("ateam"):
             continue
-        for bookmaker in match["bookmakers"]:
-            for market in bookmaker["markets"]:
-                if market["key"] != "h2h":
-                    continue
-                row = {
-                    "Match": f"{match['home_team']} vs {match['away_team']}",
-                    "Start Time": datetime.fromisoformat(match["commence_time"].replace("Z", "+00:00")),
-                    "Bookmaker": bookmaker["title"],
-                    "Home Team": match["home_team"],
-                    "Away Team": match["away_team"],
-                    "Venue": match.get("venue", "Unknown Venue"),
-                    "Match Preview": match.get("description", "No preview available.")
-                }
-                for outcome in market["outcomes"]:
-                    if outcome["name"] == match['home_team']:
-                        row["Home Odds"] = outcome["price"]
-                    elif outcome["name"] == match['away_team']:
-                        row["Away Odds"] = outcome["price"]
-                odds_list.append(row)
-    return pd.DataFrame(odds_list)
+        rows.append({
+            "Match": f"{game['hteam']} vs {game['ateam']}",
+            "Start Time": datetime.fromisoformat(game["date"]),
+            "Venue": game.get("venue", "Unknown Venue"),
+            "Home Team": game["hteam"],
+            "Away Team": game["ateam"],
+            "Home Odds": game.get("odds", {}).get("hteam", None),
+            "Away Odds": game.get("odds", {}).get("ateam", None),
+            "Match Preview": "No preview available."
+        })
+    return pd.DataFrame(rows)
 
 def fetch_squiggle_tips():
-    response = requests.get(SQUIGGLE_URL)
+    response = requests.get(SQUIGGLE_TIPS_URL)
     tips_data = response.json().get("tips", [])
     tips_list = []
     for tip in tips_data:
@@ -55,6 +46,18 @@ def fetch_squiggle_tips():
             "Confidence": tip.get("confidence", None)
         })
     return pd.DataFrame(tips_list)
+
+def fetch_squiggle_scores():
+    response = requests.get(SQUIGGLE_SCORES_URL)
+    score_data = response.json().get("games", [])
+    scores_list = []
+    for game in score_data:
+        scores_list.append({
+            "Match": f"{game['hteam']} vs {game['ateam']}",
+            "Home Score": game.get("hscore"),
+            "Away Score": game.get("ascore")
+        })
+    return pd.DataFrame(scores_list)
 
 def get_team_logo(team_name):
     formatted = team_name.lower().replace(" ", "-").replace("&", "and")
@@ -70,18 +73,27 @@ def format_countdown(start_time):
     now = datetime.utcnow()
     delta = start_time - now
     if delta.total_seconds() > 0:
-        return str(timedelta(seconds=int(delta.total_seconds())))
+        hours, remainder = divmod(int(delta.total_seconds()), 3600)
+        minutes, seconds = divmod(remainder, 60)
+        return f"{hours:02}:{minutes:02}:{seconds:02}"
     return "Kick-off!"
 
 # --- MAIN APP ---
+st.set_page_config(page_title="AFL Tipping Dashboard", layout="wide", initial_sidebar_state="expanded")
 st.title("🏏 AFL Tipping Assistant Dashboard")
 
-with st.spinner("Fetching live odds and tips..."):
-    try:
-        odds_df = fetch_theoddsapi_odds()
-        tips_df = fetch_squiggle_tips()
+# Auto-refresh timer
+st.caption("⏱ This page auto-refreshes every 60 seconds to update scores and countdowns.")
+st_autorefresh = st.experimental_rerun if st.experimental_get_query_params().get("autorefresh") else time.sleep(REFRESH_INTERVAL) or st.experimental_rerun()
 
-        combined_df = pd.merge(odds_df, tips_df, on="Match", how="left")
+with st.spinner("Fetching live games, tips, and scores..."):
+    try:
+        games_df = fetch_squiggle_games()
+        tips_df = fetch_squiggle_tips()
+        scores_df = fetch_squiggle_scores()
+
+        combined_df = pd.merge(games_df, tips_df, on="Match", how="left")
+        combined_df = pd.merge(combined_df, scores_df, on="Match", how="left")
 
         # Filters
         st.sidebar.header("🔍 Filters")
@@ -95,7 +107,7 @@ with st.spinner("Fetching live odds and tips..."):
         if min_conf > 0:
             filtered_df = filtered_df[filtered_df["Confidence"].fillna(0) >= min_conf]
 
-        st.subheader("🔢 Full Odds Table")
+        st.subheader("🔢 Full Match Table")
         for _, row in filtered_df.sort_values("Start Time").iterrows():
             with st.expander(f"{row['Match']} — {row['Start Time'].strftime('%a, %b %d %I:%M %p')} | Countdown: {format_countdown(row['Start Time'])}"):
                 col1, col2 = st.columns([1, 6])
@@ -104,17 +116,18 @@ with st.spinner("Fetching live odds and tips..."):
                     st.image(get_team_logo(row['Away Team']), width=50)
                 with col2:
                     st.markdown(f"**Venue**: {row['Venue']}")
-                    st.markdown(f"**Bookmaker**: {row['Bookmaker']}")
                     st.markdown(f"**Home Odds**: {row['Home Odds']}")
                     st.markdown(f"**Away Odds**: {row['Away Odds']}")
                     if not pd.isna(row['Tip']):
                         st.markdown(f"**Squiggle Tip**: {row['Tip']} ({row['Confidence']}% confidence)")
+                    if not pd.isna(row['Home Score']) and not pd.isna(row['Away Score']):
+                        st.success(f"**Live Score:** {row['Home Team']} {int(row['Home Score'])} - {row['Away Team']} {int(row['Away Score'])}")
                     st.markdown("**Match Preview**:")
                     st.info(row['Match Preview'])
 
         st.subheader("🔥 Potential Upset Picks")
         upsets = filtered_df.copy()
-        upsets = upsets[(upsets["Tip"] == upsets["Away Team"]) & (upsets["Away Odds"] > 2.5)]
+        upsets = upsets[(upsets["Tip"] == upsets["Away Team"]) & (upsets["Away Odds"].fillna(0) > 2.5)]
         st.dataframe(upsets if not upsets.empty else "No big upsets found this week!")
 
         st.subheader("📊 Tip Confidence Overview")
